@@ -1,12 +1,13 @@
 # encoding utf-8
 # using Python 3.5.1
-# Crawls all doc pages and check if all links are valid
+# Crawls all doc pages from the sitemap and check if all links are valid
 
 import urllib.request
 from lxml import etree
 from pathlib import Path
 import os
 import requests
+from bs4 import BeautifulSoup
 
 
 class GetURLsFromSitemap(object):
@@ -77,8 +78,12 @@ class CheckLinkStatus(object):
 
         report_name="link_report.txt"
 
-        with open(file_name,'r') as f:
-            links = f.readlines()
+        with open(file_name,'r',encoding='utf-8') as f:
+            links = f.read().splitlines()
+            # Abandonded this: links = f.readlines()
+            # readlines() is stupid because newline character is added to each element. This
+            # will lead to errors in later functions that use the URL. %0A is the URL encoding
+            # of a newline
 
         text_file = Path(report_name)
         if text_file.is_file():
@@ -87,8 +92,9 @@ class CheckLinkStatus(object):
         for link in links:
             try:
                 print(link)
-                print(type(link))
-                r = requests.head(link)
+                # print(type(link))
+                r = requests.get(link)
+                # header_info = r.raise_for_status()
                 status_code = r.status_code
 
                 """
@@ -98,25 +104,85 @@ class CheckLinkStatus(object):
                 Client errors (400–499),
                 and Server errors (500–599).
                 """
+                # Consider putting this info in a database
+                with open(report_name,'a', encoding="utf-8") as f:
 
-                with open(report_name,'a') as f:
-                    if status_code in range(100-199):
-                        f.write("Status code: " + str(status_code) + " " + str(link) + " has no errors." + "\n")
-                    if status_code in range(200,299):
-                        f.write("Status code: " + str(status_code) + " " + str(link) + " has no errors." + "\n")
+                    if status_code is 200:
+                        f.write("PASS " + "Status code: " + str(status_code) + " " + str(link) + " has no errors." + "\n")
                     elif status_code in range(300,399):
-                        f.write("Status code: " + str(status_code) + " " + str(link) + " has a redirect." + "\n")
+                        f.write("FAIL " + "Status code: " + str(status_code) + " " + str(link) + " has a redirect." + "\n")
                     elif status_code in range(400,599):
-                        f.write("Status code: " + str(status_code) + " " + str(link) + " has errors." + "\n")
+                        f.write("FAIL " + "Status code: " + str(status_code) + " " + str(link) + " has errors." + "\n")
 
 
             except requests.ConnectionError:
                 print("Failed to connect.")
 
+        # Format the report
 
+
+
+
+class GetURLFromEachPage(object):
+    
+    def __init__(self, sitemap_link_file):
+        self.sitemap_url_list = sitemap_link_file
+    
+    def extract_url_from_html(self, sitemap_link_file):
+
+        links = []
+        full_report_name = "full_link_report.txt"
+
+        with open(sitemap_link_file,'r',encoding='utf-8') as f:
+            parse_url_list = f.read().splitlines()
+
+
+        for parse_url in parse_url_list:
+
+            links.append(parse_url)
+
+            try:
+                response = urllib.request.urlopen(parse_url, data=None)
+                html_code = response.read()
+                soup = BeautifulSoup(html_code.decode("utf-8"),"lxml")
+                a_links = soup.find_all("a")
+                for a_link in a_links:
+                    link = a_link.get("href")
+                    if type(link) is str:
+
+                        if link.startswith("http://") or link.startswith("https://"):
+                            links.append(link)
+                        elif link.startswith("mailto:"):
+                            links.append(link)
+                        else:
+                            link = parse_url + link
+                            links.append(link)
+
+
+                # Need to define a dictionary to save the location of URLs.
+                # parse_url is the root page
+
+
+            except urllib.request.URLError as e:
+                print(e)
+
+
+        with open(full_report_name, "w+", encoding="utf-8") as f:
+            for link in links:
+                f.write(link + "\n")
+        # writelines() is also stupid because it does not add new line characters
+
+
+# Get sitemap
 SitemapURLMilvus = GetURLsFromSitemap("https://milvus.io/sitemap.xml")
 SitemapURLMilvus.get_url_list("https://milvus.io/sitemap.xml")
-CheckLinkStatusMilvus = CheckLinkStatus("outputlinks.txt")
-CheckLinkStatusMilvus.check_link_status("outputlinks.txt")
 
+# Extract URLs from pages in the sitemap
+GetURLFromEachPageMilvus = GetURLFromEachPage("outputlinks.txt")
+GetURLFromEachPageMilvus.extract_url_from_html("outputlinks.txt")
+
+
+# Validate all links
+CheckLinkStatusMilvus = CheckLinkStatus("full_link_report.txt")
+CheckLinkStatusMilvus.check_link_status("full_link_report.txt")
 
